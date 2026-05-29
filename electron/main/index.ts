@@ -167,6 +167,9 @@ function scheduleSnap(target: BrowserWindow) {
 
 function showWidget(focus = false) {
   if (!win || win.isDestroyed()) return
+  isInteractive = true
+  win.setFocusable(true)
+  win.setIgnoreMouseEvents(false)
   snapWidgetToCorner(win)
   if (focus) {
     win.show()
@@ -196,17 +199,13 @@ function updateTrayMenu() {
   const visible = Boolean(win && !win.isDestroyed() && win.isVisible())
   const menu = Menu.buildFromTemplate([
     {
-      label: isInteractive ? '切换到桌面模式' : '进入编辑模式',
-      click: () => applyInteractiveState(!isInteractive, true),
-    },
-    {
       label: visible ? '隐藏窗口' : '显示窗口',
       click: () => {
         if (!win || win.isDestroyed()) return
         if (win.isVisible()) {
           win.hide()
         } else {
-          showWidget(isInteractive)
+          showWidget(true)
         }
         updateTrayMenu()
       },
@@ -256,13 +255,18 @@ function createTray() {
   tray = new Tray(image.isEmpty() ? iconPath : image)
   tray.on('click', () => {
     if (!win || win.isDestroyed()) return
-    if (!win.isVisible()) {
-      showWidget(false)
+    if (win.isVisible()) {
+      win.hide()
     } else {
-      applyInteractiveState(true, true)
+      showWidget(true)
     }
+    updateTrayMenu()
   })
-  tray.on('double-click', () => applyInteractiveState(true, true))
+  tray.on('double-click', () => {
+    if (!win || win.isDestroyed()) return
+    showWidget(true)
+    updateTrayMenu()
+  })
   updateTrayMenu()
 }
 
@@ -387,14 +391,14 @@ function registerIpc() {
       updateTrayMenu()
       return false
     }
-    showWidget(isInteractive)
+    showWidget(true)
     updateTrayMenu()
     return true
   })
 }
 
 async function createWindow() {
-  const startHidden = process.argv.includes('--hidden')
+  const startHidden = !process.argv.includes('--show')
 
   win = new BrowserWindow({
     title: '计划小组件',
@@ -402,7 +406,7 @@ async function createWindow() {
     height: 540,
     minWidth: 460,
     minHeight: 480,
-    show: !startHidden,
+    show: false,
     frame: false,
     transparent: true,
     skipTaskbar: true,
@@ -418,11 +422,9 @@ async function createWindow() {
       nodeIntegration: false,
     },
   })
+  win.setSkipTaskbar(true)
 
   snapWidgetToCorner(win)
-  if (!startHidden) {
-    bringWidgetToFrontTemporarily()
-  }
 
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL)
@@ -434,6 +436,8 @@ async function createWindow() {
     if (!startHidden) {
       applyInteractiveState(true, true)
       bringWidgetToFrontTemporarily()
+    } else {
+      updateTrayMenu()
     }
   })
 
@@ -448,8 +452,9 @@ async function createWindow() {
     win?.webContents.send('main-process-message', new Date().toLocaleString())
     if (!startHidden) {
       showWidget(true)
+      applyInteractiveState(true, true)
     }
-    applyInteractiveState(true, !startHidden)
+    updateTrayMenu()
   })
 
   win.on('show', () => {
@@ -496,10 +501,12 @@ app.whenReady().then(() => {
 
   globalShortcut.register('CommandOrControl+Shift+T', () => {
     if (!win || win.isDestroyed()) return
-    if (!win.isVisible()) {
+    if (win.isVisible()) {
+      win.hide()
+      updateTrayMenu()
+    } else {
       showWidget(true)
     }
-    applyInteractiveState(!isInteractive, true)
   })
 })
 

@@ -1,6 +1,6 @@
 {
   "name": "doeffectively",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "main": "dist-electron/main/index.js",
   "description": "A translucent desktop todo and planning widget.",
   "author": "Glass Planner",
