@@ -13,6 +13,8 @@ import {
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import os from 'node:os'
+import { existsSync } from 'node:fs'
+import { execFile } from 'node:child_process'
 import Store from 'electron-store'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -102,6 +104,7 @@ let isInteractive = true
 let isQuitting = false
 let snapCorner: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' = 'top-right'
 let snapTimer: NodeJS.Timeout | null = null
+let bottomTimer: NodeJS.Timeout | null = null
 let programmaticMoveTimer: NodeJS.Timeout | null = null
 let isProgrammaticMove = false
 
@@ -165,6 +168,44 @@ function scheduleSnap(target: BrowserWindow) {
   }, 520)
 }
 
+function nativeWindowHandle(target: BrowserWindow) {
+  const handle = target.getNativeWindowHandle()
+  return process.arch === 'x64' ? handle.readBigUInt64LE(0).toString() : handle.readUInt32LE(0).toString()
+}
+
+function zOrderHelperPath() {
+  const helperName = 'zorder-helper.exe'
+  if (app.isPackaged) return path.join(process.resourcesPath, helperName)
+  return path.join(process.env.APP_ROOT, 'build', helperName)
+}
+
+function sendWidgetBehindOtherApps(target = win) {
+  if (!target || target.isDestroyed()) return
+
+  target.setAlwaysOnTop(false)
+  target.setSkipTaskbar(true)
+
+  if (process.platform !== 'win32') {
+    return
+  }
+
+  if (!target.isVisible()) return
+
+  const helper = zOrderHelperPath()
+  if (!existsSync(helper)) return
+
+  const hwnd = nativeWindowHandle(target)
+  execFile(helper, [hwnd], { windowsHide: true, timeout: 1000 }, () => undefined)
+}
+
+function scheduleWidgetBehindOtherApps(delay = 80) {
+  if (bottomTimer) clearTimeout(bottomTimer)
+  bottomTimer = setTimeout(() => {
+    bottomTimer = null
+    sendWidgetBehindOtherApps()
+  }, delay)
+}
+
 function showWidget(focus = false) {
   if (!win || win.isDestroyed()) return
   isInteractive = true
@@ -173,27 +214,19 @@ function showWidget(focus = false) {
   win.setIgnoreMouseEvents(false)
   snapWidgetToCorner(win)
   if (focus) {
-    win.show()
+    win.showInactive()
     win.setSkipTaskbar(true)
-    win.moveTop()
-    win.focus()
   } else {
     win.showInactive()
     win.setSkipTaskbar(true)
   }
+  scheduleWidgetBehindOtherApps(focus ? 260 : 40)
 }
 
 function bringWidgetToFrontTemporarily() {
   if (!win || win.isDestroyed()) return
-  win.setAlwaysOnTop(true, 'floating')
-  win.show()
-  win.moveTop()
-  win.focus()
-  setTimeout(() => {
-    if (win && !win.isDestroyed()) {
-      win.setAlwaysOnTop(false)
-    }
-  }, 1500)
+  showWidget(false)
+  scheduleWidgetBehindOtherApps(120)
 }
 
 function updateTrayMenu() {
@@ -466,18 +499,25 @@ async function createWindow() {
       win.setAlwaysOnTop(false)
       win.setSkipTaskbar(true)
       snapWidgetToCorner(win)
+      scheduleWidgetBehindOtherApps(40)
       updateTrayMenu()
     }
   })
 
   win.on('hide', updateTrayMenu)
+  win.on('focus', () => scheduleWidgetBehindOtherApps(80))
+  win.on('blur', () => scheduleWidgetBehindOtherApps(40))
 
   win.on('resize', () => {
-    if (win) snapWidgetToCorner(win)
+    if (win) {
+      snapWidgetToCorner(win)
+      scheduleWidgetBehindOtherApps(120)
+    }
   })
 
   win.on('move', () => {
     if (win && !win.isDestroyed() && !isProgrammaticMove) scheduleSnap(win)
+    scheduleWidgetBehindOtherApps(180)
     updateTrayMenu()
   })
 
@@ -527,6 +567,7 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   if (reminderTimer) clearInterval(reminderTimer)
   if (snapTimer) clearTimeout(snapTimer)
+  if (bottomTimer) clearTimeout(bottomTimer)
   if (programmaticMoveTimer) clearTimeout(programmaticMoveTimer)
   globalShortcut.unregisterAll()
   tray?.destroy()

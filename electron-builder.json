@@ -9,6 +9,12 @@
     "dist-electron",
     "dist"
   ],
+  "extraResources": [
+    {
+      "from": "build/zorder-helper.exe",
+      "to": "zorder-helper.exe"
+    }
+  ],
   "win": {
     "icon": "build/icon.ico",
     "target": [
