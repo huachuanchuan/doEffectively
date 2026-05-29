@@ -168,15 +168,18 @@ function scheduleSnap(target: BrowserWindow) {
 function showWidget(focus = false) {
   if (!win || win.isDestroyed()) return
   isInteractive = true
+  win.setSkipTaskbar(true)
   win.setFocusable(true)
   win.setIgnoreMouseEvents(false)
   snapWidgetToCorner(win)
   if (focus) {
     win.show()
+    win.setSkipTaskbar(true)
     win.moveTop()
     win.focus()
   } else {
     win.showInactive()
+    win.setSkipTaskbar(true)
   }
 }
 
@@ -230,6 +233,7 @@ function applyInteractiveState(interactive: boolean, focus = false) {
   isInteractive = interactive
   win.setAlwaysOnTop(false)
   win.setVisibleOnAllWorkspaces(false)
+  win.setSkipTaskbar(true)
   win.setFocusable(interactive)
   win.setIgnoreMouseEvents(!interactive, { forward: true })
 
@@ -460,6 +464,7 @@ async function createWindow() {
   win.on('show', () => {
     if (win) {
       win.setAlwaysOnTop(false)
+      win.setSkipTaskbar(true)
       snapWidgetToCorner(win)
       updateTrayMenu()
     }

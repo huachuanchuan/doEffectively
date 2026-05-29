@@ -654,7 +654,7 @@ function App() {
         </div>
       </header>
 
-      <div className='stats-strip' aria-label='计划总览'>
+      <div className='stats-strip short-stats' aria-label='短期计划总览'>
         <div className='stats-row'>
           <span className='stats-label'>短期</span>
           <div className='stat-pill'>
@@ -667,21 +667,6 @@ function App() {
           </div>
           <div className='stat-pill stat-alert'>
             <strong>{stats.shortOverdue}</strong>
-            <span>已逾期</span>
-          </div>
-        </div>
-        <div className='stats-row'>
-          <span className='stats-label'>长期</span>
-          <div className='stat-pill'>
-            <strong>{stats.longPlanning}</strong>
-            <span>规划</span>
-          </div>
-          <div className='stat-pill stat-good'>
-            <strong>{stats.longCompleted}</strong>
-            <span>已完成</span>
-          </div>
-          <div className='stat-pill stat-alert'>
-            <strong>{stats.longOverdue}</strong>
             <span>已逾期</span>
           </div>
         </div>
@@ -994,6 +979,24 @@ function App() {
           )}
         </div>
       </section>
+
+      <div className='stats-strip long-stats' aria-label='长期规划总览'>
+        <div className='stats-row'>
+          <span className='stats-label'>长期</span>
+          <div className='stat-pill'>
+            <strong>{stats.longPlanning}</strong>
+            <span>规划</span>
+          </div>
+          <div className='stat-pill stat-good'>
+            <strong>{stats.longCompleted}</strong>
+            <span>已完成</span>
+          </div>
+          <div className='stat-pill stat-alert'>
+            <strong>{stats.longOverdue}</strong>
+            <span>已逾期</span>
+          </div>
+        </div>
+      </div>
 
       <section className='panel-block long-panel' aria-labelledby='long-title'>
         <div className='panel-title-row'>
