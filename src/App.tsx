@@ -170,6 +170,10 @@ function timeProgress(task: LongTask, now = new Date()) {
   return Math.max(0, Math.min(100, Math.round((elapsed / total) * 100)))
 }
 
+function isLongTaskOverdue(task: LongTask, today = todayInputDate()) {
+  return !task.completed && task.end < today
+}
+
 function createBrowserPlannerApi(): PlannerApi {
   const read = (): PlannerData => {
     try {
@@ -337,20 +341,24 @@ function App() {
   }, [orderedShortPlans, shortPlanTaskMap])
 
   const stats = useMemo(() => {
-    const now = Date.now()
-    const openShort = shortTasks.filter(task => !task.completed)
-    const overdue = openShort.filter(task => new Date(task.dueAt).getTime() < now).length
-    const completedShort = shortTasks.length - openShort.length
-    const avgLongProgress = longTasks.length
-      ? Math.round(longTasks.reduce((total, task) => total + displayLongProgress(task), 0) / longTasks.length)
-      : 0
+    const now = clockTick
+    const today = todayInputDate()
+    const overdueShortPlanIds = new Set(
+      activeShortPlanCards
+        .filter(({ tasks }) => tasks.some(task => !task.completed && new Date(task.dueAt).getTime() < now))
+        .map(({ plan }) => plan.id),
+    )
+    const completedLong = longTasks.filter(task => task.completed).length
+    const overdueLong = longTasks.filter(task => isLongTaskOverdue(task, today)).length
     return {
-      openShort: openShort.length,
-      completedShort,
-      overdue,
-      avgLongProgress,
+      shortPending: activeShortPlanCards.length - overdueShortPlanIds.size,
+      shortCompleted: doneShortPlanCards.length,
+      shortOverdue: overdueShortPlanIds.size,
+      longPlanning: longTasks.length - completedLong - overdueLong,
+      longCompleted: completedLong,
+      longOverdue: overdueLong,
     }
-  }, [longTasks, shortTasks, longTaskStats])
+  }, [activeShortPlanCards, clockTick, doneShortPlanCards, longTasks])
 
   useEffect(() => {
     if (window.location.hash === '#celebrate') {
@@ -646,22 +654,36 @@ function App() {
         </div>
       </header>
 
-      <div className='stats-strip' aria-label='计划概览'>
-        <div>
-          <strong>{stats.openShort}</strong>
-          <span>待办</span>
+      <div className='stats-strip' aria-label='计划总览'>
+        <div className='stats-row'>
+          <span className='stats-label'>短期</span>
+          <div className='stat-pill'>
+            <strong>{stats.shortPending}</strong>
+            <span>待办</span>
+          </div>
+          <div className='stat-pill stat-good'>
+            <strong>{stats.shortCompleted}</strong>
+            <span>已完成</span>
+          </div>
+          <div className='stat-pill stat-alert'>
+            <strong>{stats.shortOverdue}</strong>
+            <span>已逾期</span>
+          </div>
         </div>
-        <div>
-          <strong>{stats.completedShort}</strong>
-          <span>已完成</span>
-        </div>
-        <div className={stats.overdue > 0 ? 'stat-alert' : undefined}>
-          <strong>{stats.overdue}</strong>
-          <span>逾期</span>
-        </div>
-        <div>
-          <strong>{stats.avgLongProgress}%</strong>
-          <span>长期进度</span>
+        <div className='stats-row'>
+          <span className='stats-label'>长期</span>
+          <div className='stat-pill'>
+            <strong>{stats.longPlanning}</strong>
+            <span>规划</span>
+          </div>
+          <div className='stat-pill stat-good'>
+            <strong>{stats.longCompleted}</strong>
+            <span>已完成</span>
+          </div>
+          <div className='stat-pill stat-alert'>
+            <strong>{stats.longOverdue}</strong>
+            <span>已逾期</span>
+          </div>
         </div>
       </div>
 
