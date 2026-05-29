@@ -1,0 +1,42 @@
+{
+  "name": "doeffectively",
+  "version": "2.2.0",
+  "main": "dist-electron/main/index.js",
+  "description": "A translucent desktop todo and planning widget.",
+  "author": "Glass Planner",
+  "license": "MIT",
+  "private": true,
+  "debug": {
+    "env": {
+      "VITE_DEV_SERVER_URL": "http://127.0.0.1:7777/"
+    }
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "node ./node_modules/vite/bin/vite.js",
+    "build": "node ./node_modules/typescript/bin/tsc && node ./node_modules/vite/bin/vite.js build && node ./node_modules/electron-builder/cli.js",
+    "preview": "node ./node_modules/vite/bin/vite.js preview",
+    "icon": "node scripts/generate-icon.mjs"
+  },
+  "dependencies": {
+    "canvas-confetti": "^1.9.4",
+    "electron-store": "^11.0.2"
+  },
+  "devDependencies": {
+    "@types/canvas-confetti": "^1.9.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "electron": "^33.2.0",
+    "electron-builder": "^24.13.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.4.2",
+    "vite": "^5.4.11",
+    "vite-plugin-electron": "^0.29.0",
+    "vite-plugin-electron-renderer": "^0.14.6"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-win32-x64-msvc": "^4.60.4"
+  }
+}
