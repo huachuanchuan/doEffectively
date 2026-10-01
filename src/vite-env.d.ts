@@ -34,11 +34,23 @@ interface LongTask {
   delayedAt?: string | null
 }
 
+type FontFamilyPreference = 'system' | 'rounded' | 'serif' | 'mono'
+
+interface AppearancePreferences {
+  fontFamily: FontFamilyPreference
+  fontSize: number
+  accentColor: string
+  textColor: string
+  glassTint: string
+  motto: string
+}
+
 interface PlannerData {
   shortPlans: ShortPlan[]
   shortTasks: ShortTask[]
   longTasks: LongTask[]
   notifiedTaskIds: string[]
+  preferences: AppearancePreferences
 }
 
 interface PlannerApi {
@@ -46,14 +58,11 @@ interface PlannerApi {
   saveShortPlans: (plans: ShortPlan[]) => Promise<ShortPlan[]>
   saveShortTasks: (tasks: ShortTask[]) => Promise<ShortTask[]>
   saveLongTasks: (tasks: LongTask[]) => Promise<LongTask[]>
+  savePreferences: (preferences: AppearancePreferences) => Promise<AppearancePreferences>
   celebrate: () => void
-  setInteractive: (interactive: boolean) => void
-  toggleWidget: () => Promise<boolean>
-  onInteractiveChanged: (listener: (interactive: boolean) => void) => () => void
 }
 
 interface Window {
-  ipcRenderer: import('electron').IpcRenderer
   plannerApi: PlannerApi
 }
 

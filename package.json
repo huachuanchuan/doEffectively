@@ -1,6 +1,6 @@
 {
   "name": "doeffectively",
-  "version": "2.2.4",
+  "version": "2.3.1",
   "main": "dist-electron/main/index.js",
   "description": "A translucent desktop todo and planning widget.",
   "author": "Glass Planner",
@@ -14,11 +14,13 @@
   "type": "module",
   "scripts": {
     "dev": "node ./node_modules/vite/bin/vite.js",
+    "test": "node tests/regressions.test.mjs",
     "build": "node ./node_modules/typescript/bin/tsc && node ./node_modules/vite/bin/vite.js build && node ./node_modules/electron-builder/cli.js",
     "preview": "node ./node_modules/vite/bin/vite.js preview",
     "icon": "node scripts/generate-icon.mjs"
   },
   "dependencies": {
+    "@hicccc77/electron-liquid-glass": "^0.3.0",
     "canvas-confetti": "^1.9.4",
     "electron-store": "^11.0.2"
   },

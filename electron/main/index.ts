@@ -16,6 +16,8 @@ import os from 'node:os'
 import { existsSync } from 'node:fs'
 import { execFile } from 'node:child_process'
 import Store from 'electron-store'
+import * as liquidGlass from '@hicccc77/electron-liquid-glass'
+import type { GlassPanel } from '@hicccc77/electron-liquid-glass'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -72,17 +74,152 @@ interface LongTask {
   delayedAt?: string | null
 }
 
+type FontFamilyPreference = 'system' | 'rounded' | 'serif' | 'mono'
+
+interface AppearancePreferences {
+  fontFamily: FontFamilyPreference
+  fontSize: number
+  accentColor: string
+  textColor: string
+  glassTint: string
+  motto: string
+}
+
 interface PlannerData {
   shortPlans: ShortPlan[]
   shortTasks: ShortTask[]
   longTasks: LongTask[]
   notifiedTaskIds: string[]
+  preferences: AppearancePreferences
 }
 
 type PlannerStoreShape = {
   get<K extends keyof PlannerData>(key: K): PlannerData[K]
   set<K extends keyof PlannerData>(key: K, value: PlannerData[K]): void
   readonly store: PlannerData
+}
+
+const WIDGET_WIDTH = 530
+const WIDGET_HEIGHT = 620
+const WIDGET_RADIUS = 32
+const MAX_SHORT_PLANS = 500
+const MAX_SHORT_TASKS = 5000
+const MAX_LONG_TASKS = 1000
+const DEFAULT_PREFERENCES: AppearancePreferences = {
+  fontFamily: 'system',
+  fontSize: 14,
+  accentColor: '#2f7cff',
+  textColor: '#17334d',
+  glassTint: '#bfeeff',
+  motto: '把今天的行动，放进长期的节奏里',
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function cleanText(value: unknown, maxLength: number) {
+  return typeof value === 'string' ? value.trim().slice(0, maxLength) : ''
+}
+
+function cleanIso(value: unknown, fallback = new Date().toISOString()) {
+  if (typeof value !== 'string') return fallback
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? fallback : date.toISOString()
+}
+
+function cleanInputDate(value: unknown) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return ''
+  const date = new Date(`${value}T00:00:00`)
+  return Number.isNaN(date.getTime()) ? '' : value
+}
+
+function cleanPlanDate(value: unknown) {
+  return typeof value === 'string' && /^\d{8}$/.test(value) ? value : ''
+}
+
+function cleanHexColor(value: unknown, fallback: string) {
+  return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value) ? value.toLowerCase() : fallback
+}
+
+function sanitizePreferences(value: unknown): AppearancePreferences {
+  if (!isRecord(value)) return { ...DEFAULT_PREFERENCES }
+  const fontFamily = ['system', 'rounded', 'serif', 'mono'].includes(String(value.fontFamily))
+    ? value.fontFamily as FontFamilyPreference
+    : DEFAULT_PREFERENCES.fontFamily
+  const rawFontSize = typeof value.fontSize === 'number' && Number.isFinite(value.fontSize)
+    ? value.fontSize
+    : DEFAULT_PREFERENCES.fontSize
+
+  return {
+    fontFamily,
+    fontSize: Math.max(12, Math.min(18, Math.round(rawFontSize))),
+    accentColor: cleanHexColor(value.accentColor, DEFAULT_PREFERENCES.accentColor),
+    textColor: cleanHexColor(value.textColor, DEFAULT_PREFERENCES.textColor),
+    glassTint: cleanHexColor(value.glassTint, DEFAULT_PREFERENCES.glassTint),
+    motto: cleanText(value.motto, 120) || DEFAULT_PREFERENCES.motto,
+  }
+}
+
+function sanitizeShortPlans(value: unknown): ShortPlan[] {
+  if (!Array.isArray(value)) return []
+  return value.slice(0, MAX_SHORT_PLANS).flatMap((item) => {
+    if (!isRecord(item)) return []
+    const id = cleanText(item.id, 128)
+    const name = cleanText(item.name, 160)
+    const planDate = cleanPlanDate(item.planDate)
+    if (!id || !name || !planDate) return []
+    return [{ id, name, planDate, createdAt: cleanIso(item.createdAt) }]
+  })
+}
+
+function sanitizeShortTasks(value: unknown): ShortTask[] {
+  if (!Array.isArray(value)) return []
+  return value.slice(0, MAX_SHORT_TASKS).flatMap((item) => {
+    if (!isRecord(item)) return []
+    const id = cleanText(item.id, 128)
+    const title = cleanText(item.title, 240)
+    const planId = cleanText(item.planId, 128)
+    const planDate = cleanPlanDate(item.planDate)
+    const priority = Number(item.priority)
+    if (!id || !title || !planId || !planDate || ![1, 2, 3, 4].includes(priority)) return []
+    const longTaskId = item.longTaskId == null ? null : cleanText(item.longTaskId, 128) || null
+    return [{
+      id,
+      title,
+      planId,
+      planDate,
+      longTaskId,
+      priority: priority as Priority,
+      dueAt: cleanIso(item.dueAt),
+      completed: item.completed === true,
+      createdAt: cleanIso(item.createdAt),
+    }]
+  })
+}
+
+function sanitizeLongTasks(value: unknown): LongTask[] {
+  if (!Array.isArray(value)) return []
+  return value.slice(0, MAX_LONG_TASKS).flatMap((item) => {
+    if (!isRecord(item)) return []
+    const id = cleanText(item.id, 128)
+    const name = cleanText(item.name, 240)
+    const start = cleanInputDate(item.start)
+    const end = cleanInputDate(item.end)
+    if (!id || !name || !start || !end) return []
+    const rawProgress = typeof item.progress === 'number' && Number.isFinite(item.progress) ? item.progress : 0
+    const progressMode = item.progressMode === 'manual' || item.progressMode === 'time' ? item.progressMode : 'linked'
+    return [{
+      id,
+      name,
+      start,
+      end: end < start ? start : end,
+      progress: Math.max(0, Math.min(100, rawProgress)),
+      progressMode,
+      completed: item.completed === true,
+      delayedAt: item.delayedAt == null ? null : cleanIso(item.delayedAt, ''),
+    }]
+  })
 }
 
 const plannerStoreBase = new Store<PlannerData>({
@@ -92,6 +229,7 @@ const plannerStoreBase = new Store<PlannerData>({
     shortTasks: [],
     longTasks: [],
     notifiedTaskIds: [],
+    preferences: DEFAULT_PREFERENCES,
   },
 })
 const plannerStore = plannerStoreBase as unknown as PlannerStoreShape
@@ -100,7 +238,8 @@ let win: BrowserWindow | null = null
 let tray: Tray | null = null
 let celebrateWin: BrowserWindow | null = null
 let reminderTimer: NodeJS.Timeout | null = null
-let isInteractive = true
+let glassPanel: GlassPanel | null = null
+let glassPanelDpr = 0
 let isQuitting = false
 let snapCorner: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' = 'top-right'
 let snapTimer: NodeJS.Timeout | null = null
@@ -110,6 +249,92 @@ let isProgrammaticMove = false
 
 const preload = path.join(__dirname, '../preload/index.mjs')
 const indexHtml = path.join(RENDERER_DIST, 'index.html')
+
+function roundedWindowShape(width: number, height: number, radius: number) {
+  const safeRadius = Math.max(0, Math.min(radius, Math.floor(Math.min(width, height) / 2)))
+  const rows: Electron.Rectangle[] = []
+  let spanStart = 0
+  let previousInset = -1
+
+  for (let y = 0; y < height; y += 1) {
+    const edgeY = y < safeRadius ? safeRadius - y - 0.5 : y >= height - safeRadius ? y - (height - safeRadius) + 0.5 : 0
+    const inset = edgeY > 0
+      ? Math.ceil(safeRadius - Math.sqrt(Math.max(0, safeRadius * safeRadius - edgeY * edgeY)))
+      : 0
+
+    if (previousInset !== -1 && inset !== previousInset) {
+      rows.push({ x: previousInset, y: spanStart, width: width - previousInset * 2, height: y - spanStart })
+      spanStart = y
+    }
+    previousInset = inset
+  }
+
+  rows.push({ x: previousInset, y: spanStart, width: width - previousInset * 2, height: height - spanStart })
+  return rows.filter(row => row.width > 0 && row.height > 0)
+}
+
+function applyRoundedWindowShape(target: BrowserWindow) {
+  if (process.platform !== 'win32' || target.isDestroyed()) return
+  const { width, height } = target.getContentBounds()
+  target.setShape(roundedWindowShape(width, height, WIDGET_RADIUS))
+}
+
+function physicalWidgetBounds(target: BrowserWindow) {
+  return screen.dipToScreenRect(target, target.getBounds())
+}
+
+function destroyGlassPanel() {
+  glassPanel?.destroy()
+  glassPanel = null
+  glassPanelDpr = 0
+}
+
+function ensureGlassPanel(target: BrowserWindow) {
+  if (glassPanel || target.isDestroyed()) return
+
+  try {
+    if (process.platform === 'win32' && liquidGlass.isSupported()) {
+      const bounds = physicalWidgetBounds(target)
+      const dpr = screen.getDisplayMatching(target.getBounds()).scaleFactor
+      glassPanel = liquidGlass.createPanel({
+        ...bounds,
+        dpr,
+        cornerRadius: WIDGET_RADIUS * dpr,
+        blurSigma: 2.4 * dpr,
+        displacementScale: 54 * dpr,
+        aberrationIntensity: 1.2,
+        saturation: 1.18,
+        excludeFromCapture: true,
+        anchorWindow: target,
+      })
+      glassPanelDpr = glassPanel ? dpr : 0
+    }
+  } catch {
+    glassPanel = null
+  }
+
+  if (!glassPanel && process.platform === 'win32') {
+    target.setBackgroundMaterial('acrylic')
+  }
+}
+
+function syncGlassPanelBounds(target = win) {
+  if (!target || target.isDestroyed()) return
+  if (!glassPanel) {
+    ensureGlassPanel(target)
+    return
+  }
+
+  const dpr = screen.getDisplayMatching(target.getBounds()).scaleFactor
+  if (Math.abs(dpr - glassPanelDpr) > 0.01) {
+    destroyGlassPanel()
+    ensureGlassPanel(target)
+    return
+  }
+
+  glassPanel.setBounds(physicalWidgetBounds(target))
+  glassPanel.anchor(target)
+}
 
 function getCornerPosition(target: BrowserWindow, corner: typeof snapCorner) {
   const { workArea } = screen.getDisplayMatching(target.getBounds())
@@ -195,7 +420,9 @@ function sendWidgetBehindOtherApps(target = win) {
   if (!existsSync(helper)) return
 
   const hwnd = nativeWindowHandle(target)
-  execFile(helper, [hwnd], { windowsHide: true, timeout: 1000 }, () => undefined)
+  execFile(helper, [hwnd], { windowsHide: true, timeout: 1000 }, () => {
+    if (glassPanel && target === win) glassPanel.anchor(target)
+  })
 }
 
 function scheduleWidgetBehindOtherApps(delay = 80) {
@@ -208,18 +435,15 @@ function scheduleWidgetBehindOtherApps(delay = 80) {
 
 function showWidget(focus = false) {
   if (!win || win.isDestroyed()) return
-  isInteractive = true
   win.setSkipTaskbar(true)
   win.setFocusable(true)
   win.setIgnoreMouseEvents(false)
   snapWidgetToCorner(win)
-  if (focus) {
-    win.showInactive()
-    win.setSkipTaskbar(true)
-  } else {
-    win.showInactive()
-    win.setSkipTaskbar(true)
-  }
+  win.showInactive()
+  ensureGlassPanel(win)
+  syncGlassPanelBounds(win)
+  glassPanel?.show(focus ? 120 : 60)
+  win.setSkipTaskbar(true)
   scheduleWidgetBehindOtherApps(focus ? 260 : 40)
 }
 
@@ -258,30 +482,6 @@ function updateTrayMenu() {
 
   tray.setToolTip('计划小组件')
   tray.setContextMenu(menu)
-}
-
-function applyInteractiveState(interactive: boolean, focus = false) {
-  if (!win || win.isDestroyed()) return
-
-  isInteractive = interactive
-  win.setAlwaysOnTop(false)
-  win.setVisibleOnAllWorkspaces(false)
-  win.setSkipTaskbar(true)
-  win.setFocusable(interactive)
-  win.setIgnoreMouseEvents(!interactive, { forward: true })
-
-  if (interactive) {
-    showWidget(focus)
-  } else if (win.isVisible()) {
-    win.blur()
-    showWidget(false)
-  }
-
-  if (!win.webContents.isDestroyed()) {
-    win.webContents.send('planner:interactive-changed', interactive)
-  }
-
-  updateTrayMenu()
 }
 
 function createTray() {
@@ -327,6 +527,7 @@ function showCelebrateOverlay() {
       preload,
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   })
 
@@ -393,45 +594,47 @@ function setupAutoLaunch() {
 }
 
 function registerIpc() {
-  ipcMain.handle('planner:get-data', () => plannerStore.store)
+  ipcMain.handle('planner:get-data', () => ({
+    shortPlans: sanitizeShortPlans(plannerStore.get('shortPlans')),
+    shortTasks: sanitizeShortTasks(plannerStore.get('shortTasks')),
+    longTasks: sanitizeLongTasks(plannerStore.get('longTasks')),
+    notifiedTaskIds: Array.isArray(plannerStore.get('notifiedTaskIds'))
+      ? plannerStore.get('notifiedTaskIds').filter(id => typeof id === 'string').slice(0, MAX_SHORT_TASKS)
+      : [],
+    preferences: sanitizePreferences(plannerStore.get('preferences')),
+  }))
 
-  ipcMain.handle('planner:save-short-plans', (_event, plans: ShortPlan[]) => {
-    plannerStore.set('shortPlans', plans)
-    return plans
+  ipcMain.handle('planner:save-short-plans', (_event, plans: unknown) => {
+    const sanitized = sanitizeShortPlans(plans)
+    plannerStore.set('shortPlans', sanitized)
+    return sanitized
   })
 
-  ipcMain.handle('planner:save-short-tasks', (_event, tasks: ShortTask[]) => {
-    plannerStore.set('shortTasks', tasks)
-    const alive = new Set(tasks.filter(task => !task.completed).map(task => task.id))
+  ipcMain.handle('planner:save-short-tasks', (_event, tasks: unknown) => {
+    const sanitized = sanitizeShortTasks(tasks)
+    plannerStore.set('shortTasks', sanitized)
+    const alive = new Set(sanitized.filter(task => !task.completed).map(task => task.id))
     const notified = plannerStore.get('notifiedTaskIds').filter(id => alive.has(id))
     plannerStore.set('notifiedTaskIds', notified)
-    return tasks
+    return sanitized
   })
 
-  ipcMain.handle('planner:save-long-tasks', (_event, tasks: LongTask[]) => {
-    plannerStore.set('longTasks', tasks)
-    return tasks
+  ipcMain.handle('planner:save-long-tasks', (_event, tasks: unknown) => {
+    const sanitized = sanitizeLongTasks(tasks)
+    plannerStore.set('longTasks', sanitized)
+    return sanitized
+  })
+
+  ipcMain.handle('planner:save-preferences', (_event, preferences: unknown) => {
+    const sanitized = sanitizePreferences(preferences)
+    plannerStore.set('preferences', sanitized)
+    return sanitized
   })
 
   ipcMain.on('planner:celebrate', () => {
     showCelebrateOverlay()
   })
 
-  ipcMain.on('planner:set-interactive', (_event, interactive: boolean) => {
-    applyInteractiveState(interactive, interactive)
-  })
-
-  ipcMain.handle('planner:toggle-widget', () => {
-    if (!win || win.isDestroyed()) return false
-    if (win.isVisible()) {
-      win.hide()
-      updateTrayMenu()
-      return false
-    }
-    showWidget(true)
-    updateTrayMenu()
-    return true
-  })
 }
 
 async function createWindow() {
@@ -439,27 +642,37 @@ async function createWindow() {
 
   win = new BrowserWindow({
     title: '计划小组件',
-    width: 530,
-    height: 540,
-    minWidth: 460,
-    minHeight: 480,
+    width: WIDGET_WIDTH,
+    height: WIDGET_HEIGHT,
+    minWidth: WIDGET_WIDTH,
+    minHeight: WIDGET_HEIGHT,
+    maxWidth: WIDGET_WIDTH,
+    maxHeight: WIDGET_HEIGHT,
+    useContentSize: true,
     show: false,
     frame: false,
     transparent: true,
     skipTaskbar: true,
-    resizable: true,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
     focusable: true,
     alwaysOnTop: false,
     hasShadow: false,
     backgroundColor: '#00000000',
+    backgroundMaterial: 'none',
     icon: path.join(process.env.VITE_PUBLIC, 'favicon.ico'),
     webPreferences: {
       preload,
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   })
   win.setSkipTaskbar(true)
+  applyRoundedWindowShape(win)
+  win.webContents.setZoomFactor(1)
+  void win.webContents.setVisualZoomLevelLimits(1, 1)
 
   snapWidgetToCorner(win)
 
@@ -471,7 +684,7 @@ async function createWindow() {
 
   win.once('ready-to-show', () => {
     if (!startHidden) {
-      applyInteractiveState(true, true)
+      showWidget(true)
       bringWidgetToFrontTemporarily()
     } else {
       updateTrayMenu()
@@ -480,7 +693,7 @@ async function createWindow() {
 
   setTimeout(() => {
     if (win && !win.isDestroyed() && !startHidden) {
-      applyInteractiveState(true, true)
+      showWidget(true)
       bringWidgetToFrontTemporarily()
     }
   }, 1200)
@@ -489,7 +702,6 @@ async function createWindow() {
     win?.webContents.send('main-process-message', new Date().toLocaleString())
     if (!startHidden) {
       showWidget(true)
-      applyInteractiveState(true, true)
     }
     updateTrayMenu()
   })
@@ -499,24 +711,33 @@ async function createWindow() {
       win.setAlwaysOnTop(false)
       win.setSkipTaskbar(true)
       snapWidgetToCorner(win)
+      ensureGlassPanel(win)
+      syncGlassPanelBounds(win)
+      glassPanel?.show(80)
       scheduleWidgetBehindOtherApps(40)
       updateTrayMenu()
     }
   })
 
-  win.on('hide', updateTrayMenu)
+  win.on('hide', () => {
+    glassPanel?.hide(80)
+    updateTrayMenu()
+  })
   win.on('focus', () => scheduleWidgetBehindOtherApps(80))
   win.on('blur', () => scheduleWidgetBehindOtherApps(40))
 
   win.on('resize', () => {
     if (win) {
+      applyRoundedWindowShape(win)
       snapWidgetToCorner(win)
+      syncGlassPanelBounds(win)
       scheduleWidgetBehindOtherApps(120)
     }
   })
 
   win.on('move', () => {
     if (win && !win.isDestroyed() && !isProgrammaticMove) scheduleSnap(win)
+    syncGlassPanelBounds(win)
     scheduleWidgetBehindOtherApps(180)
     updateTrayMenu()
   })
@@ -528,8 +749,17 @@ async function createWindow() {
   })
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https:')) shell.openExternal(url)
+    try {
+      const target = new URL(url)
+      if (target.protocol === 'https:') void shell.openExternal(target.toString())
+    } catch {
+      // Ignore malformed or untrusted external URLs.
+    }
     return { action: 'deny' }
+  })
+
+  win.webContents.on('will-navigate', (event) => {
+    event.preventDefault()
   })
 
 }
@@ -570,6 +800,8 @@ app.on('will-quit', () => {
   if (bottomTimer) clearTimeout(bottomTimer)
   if (programmaticMoveTimer) clearTimeout(programmaticMoveTimer)
   globalShortcut.unregisterAll()
+  destroyGlassPanel()
+  liquidGlass.shutdown()
   tray?.destroy()
   tray = null
 })
@@ -578,23 +810,13 @@ app.on('second-instance', () => {
   if (win && !win.isDestroyed()) {
     if (win.isMinimized()) win.restore()
     showWidget(true)
-    applyInteractiveState(true, true)
   }
 })
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length) {
     showWidget(true)
-    applyInteractiveState(true, true)
   } else {
     createWindow()
-  }
-})
-
-ipcMain.handle('open-win', async (_event, arg) => {
-  if (!win || win.isDestroyed()) return
-  if (!win.isVisible()) showWidget(true)
-  if (typeof arg === 'string' && arg === 'toggle-widget') {
-    applyInteractiveState(!isInteractive, true)
   }
 })

@@ -5,7 +5,12 @@ import react from '@vitejs/plugin-react'
 import electron from 'vite-plugin-electron/simple'
 import pkg from './package.json'
 
-const mainProcessExternals = ['electron', /^node:/]
+const mainProcessExternals = [
+  'electron',
+  /^node:/,
+  '@hicccc77/electron-liquid-glass',
+  'node-gyp-build',
+]
 
 export default defineConfig(({ command }) => {
   rmSync('dist-electron', { recursive: true, force: true })

@@ -2,12 +2,18 @@
   "appId": "local.glass.planner",
   "productName": "GlassPlanner",
   "asar": true,
+  "asarUnpack": [
+    "node_modules/@hicccc77/electron-liquid-glass/**/*"
+  ],
   "directories": {
     "output": "release/${version}"
   },
   "files": [
     "dist-electron",
-    "dist"
+    "dist",
+    "package.json",
+    "node_modules/@hicccc77/electron-liquid-glass/**/*",
+    "node_modules/node-gyp-build/**/*"
   ],
   "extraResources": [
     {

@@ -1,4 +1,4 @@
-import { type CSSProperties, type FormEvent, useEffect, useMemo, useState } from 'react'
+import { type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useState } from 'react'
 import confetti from 'canvas-confetti'
 import { useDynamicUrgency } from './hooks/useDynamicUrgency'
 import './App.css'
@@ -11,6 +11,21 @@ const PRIORITY_OPTIONS: Array<{ value: Priority, label: string, short: string }>
 ]
 
 const STORAGE_KEY = 'glass-planner-data'
+const DEFAULT_PREFERENCES: AppearancePreferences = {
+  fontFamily: 'system',
+  fontSize: 14,
+  accentColor: '#2f7cff',
+  textColor: '#17334d',
+  glassTint: '#bfeeff',
+  motto: '把今天的行动，放进长期的节奏里',
+}
+
+const FONT_STACKS: Record<FontFamilyPreference, string> = {
+  system: "Inter, 'Microsoft YaHei', 'PingFang SC', 'Segoe UI', system-ui, sans-serif",
+  rounded: "'Arial Rounded MT Bold', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif",
+  serif: "'Noto Serif SC', 'Songti SC', SimSun, serif",
+  mono: "'Cascadia Code', 'SFMono-Regular', Consolas, monospace",
+}
 
 function todayInputDate() {
   const now = new Date()
@@ -25,19 +40,6 @@ function formatPlanDate(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}${month}${day}`
-}
-
-function toInputDate(date: Date) {
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const d = String(date.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
-}
-
-function addDays(value: string, days: number) {
-  const date = parseInputDate(value) ?? new Date()
-  date.setDate(date.getDate() + days)
-  return toInputDate(date)
 }
 
 function toDueIso(planDate: string, timeHHMM: string) {
@@ -148,6 +150,25 @@ function normalizeLongTasks(tasks: LongTask[]) {
   }))
 }
 
+function normalizePreferences(value?: Partial<AppearancePreferences>): AppearancePreferences {
+  const fontFamily = value?.fontFamily && Object.hasOwn(FONT_STACKS, value.fontFamily)
+    ? value.fontFamily
+    : DEFAULT_PREFERENCES.fontFamily
+  const rawFontSize = typeof value?.fontSize === 'number' ? value.fontSize : DEFAULT_PREFERENCES.fontSize
+  const color = (candidate: string | undefined, fallback: string) => /^#[0-9a-fA-F]{6}$/.test(candidate ?? '')
+    ? candidate!.toLowerCase()
+    : fallback
+
+  return {
+    fontFamily,
+    fontSize: Math.max(12, Math.min(18, Math.round(rawFontSize))),
+    accentColor: color(value?.accentColor, DEFAULT_PREFERENCES.accentColor),
+    textColor: color(value?.textColor, DEFAULT_PREFERENCES.textColor),
+    glassTint: color(value?.glassTint, DEFAULT_PREFERENCES.glassTint),
+    motto: value?.motto?.trim().slice(0, 120) || DEFAULT_PREFERENCES.motto,
+  }
+}
+
 function parseInputDate(value: string) {
   const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
   if (!match) return null
@@ -186,6 +207,7 @@ function createBrowserPlannerApi(): PlannerApi {
         shortTasks: [],
         longTasks: [],
         notifiedTaskIds: [],
+        preferences: DEFAULT_PREFERENCES,
       }
     }
   }
@@ -211,10 +233,13 @@ function createBrowserPlannerApi(): PlannerApi {
       write({ ...data, longTasks: tasks })
       return tasks
     },
+    savePreferences: async (preferences) => {
+      const data = read()
+      const normalized = normalizePreferences(preferences)
+      write({ ...data, preferences: normalized })
+      return normalized
+    },
     celebrate: () => undefined,
-    setInteractive: () => undefined,
-    toggleWidget: async () => true,
-    onInteractiveChanged: () => () => undefined,
   }
 }
 
@@ -240,8 +265,12 @@ function App() {
   const [shortPlans, setShortPlans] = useState<ShortPlan[]>([])
   const [shortTasks, setShortTasks] = useState<ShortTask[]>([])
   const [longTasks, setLongTasks] = useState<LongTask[]>([])
+  const [preferences, setPreferences] = useState<AppearancePreferences>(DEFAULT_PREFERENCES)
   const [dataReady, setDataReady] = useState(false)
   const [clockTick, setClockTick] = useState(() => Date.now())
+  const [settingsOpen, setSettingsOpen] = useState(() => window.location.hash === '#settings')
+  const [editingMotto, setEditingMotto] = useState(false)
+  const [mottoDraft, setMottoDraft] = useState(DEFAULT_PREFERENCES.motto)
 
   const [showShortPlanCreator, setShowShortPlanCreator] = useState(false)
   const [newShortPlanName, setNewShortPlanName] = useState('')
@@ -316,11 +345,13 @@ function App() {
     [shortPlans],
   )
 
-  const orderedLongTasks = useMemo(
-    () => longTasks.slice().sort((left, right) => {
-      if (left.completed !== right.completed) return left.completed ? 1 : -1
-      return left.end.localeCompare(right.end)
-    }),
+  const { activeLongTasks, completedLongTasks } = useMemo(() => {
+    const ordered = longTasks.slice().sort((left, right) => left.end.localeCompare(right.end))
+    return {
+      activeLongTasks: ordered.filter(task => !task.completed),
+      completedLongTasks: ordered.filter(task => task.completed),
+    }
+  },
     [longTasks],
   )
 
@@ -382,10 +413,14 @@ function App() {
         setShortPlans(normalizedShortPlans)
         setShortTasks(cleanedShort)
         setLongTasks(normalizedLong)
+        const normalizedPreferences = normalizePreferences(data.preferences)
+        setPreferences(normalizedPreferences)
+        setMottoDraft(normalizedPreferences.motto)
 
         void plannerApi.saveShortPlans(normalizedShortPlans)
         void plannerApi.saveShortTasks(cleanedShort)
         void plannerApi.saveLongTasks(normalizedLong)
+        void plannerApi.savePreferences(normalizedPreferences)
       })
       .finally(() => {
         setDataReady(true)
@@ -595,11 +630,12 @@ function App() {
     await updateLongTasks(next)
   }
 
-  async function delayLongTask(taskId: string) {
+  async function delayLongTask(taskId: string, selectedEnd: string) {
+    if (!selectedEnd) return
     const next = longTasks.map(task => task.id === taskId
       ? {
         ...task,
-        end: addDays(task.end, 7),
+        end: selectedEnd < task.start ? task.start : selectedEnd,
         completed: false,
         delayedAt: new Date().toISOString(),
         progress: 0,
@@ -608,6 +644,31 @@ function App() {
       : task)
 
     await updateLongTasks(next)
+  }
+
+  async function updatePreferences(patch: Partial<AppearancePreferences>) {
+    const next = normalizePreferences({ ...preferences, ...patch })
+    setPreferences(next)
+    await plannerApi.savePreferences(next)
+  }
+
+  function startEditingMotto() {
+    setMottoDraft(preferences.motto)
+    setEditingMotto(true)
+  }
+
+  async function saveMotto() {
+    const motto = mottoDraft.trim() || DEFAULT_PREFERENCES.motto
+    setEditingMotto(false)
+    await updatePreferences({ motto })
+  }
+
+  function updateGlassLight(event: ReactPointerEvent<HTMLDivElement>) {
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const x = ((event.clientX - bounds.left) / bounds.width) * 100
+    const y = ((event.clientY - bounds.top) / bounds.height) * 100
+    event.currentTarget.style.setProperty('--pointer-x', `${x}%`)
+    event.currentTarget.style.setProperty('--pointer-y', `${y}%`)
   }
 
   function startEditLongTask(task: LongTask) {
@@ -646,13 +707,134 @@ function App() {
     return <div className='celebration-canvas' />
   }
 
+  const themeStyle = {
+    '--accent': preferences.accentColor,
+    '--text-main': preferences.textColor,
+    '--glass-tint': preferences.glassTint,
+    '--ui-font-size': `${preferences.fontSize}px`,
+    '--ui-font-family': FONT_STACKS[preferences.fontFamily],
+  } as CSSProperties
+
   return (
-    <div className='widget-shell'>
+    <div
+      className={settingsOpen ? 'widget-shell settings-mode' : 'widget-shell'}
+      style={themeStyle}
+      onPointerMove={updateGlassLight}
+    >
+      <svg className='liquid-filter-defs' aria-hidden='true'>
+        <defs>
+          <filter id='liquid-glass-edge' x='-20%' y='-20%' width='140%' height='140%'>
+            <feTurbulence type='fractalNoise' baseFrequency='0.012 0.026' numOctaves='2' seed='8' result='noise' />
+            <feGaussianBlur in='noise' stdDeviation='1.2' result='softNoise' />
+            <feDisplacementMap in='SourceGraphic' in2='softNoise' scale='8' xChannelSelector='R' yChannelSelector='B' />
+          </filter>
+        </defs>
+      </svg>
+      <div className='glass-atmosphere' aria-hidden='true' />
       <header className='widget-header'>
         <div className='title-stack'>
           <h1>计划小组件</h1>
+          <p>{settingsOpen ? '个性化你的专注空间' : '专注今天 · 推进长期'}</p>
         </div>
+        <button
+          type='button'
+          className={settingsOpen ? 'icon-button settings-button is-active' : 'icon-button settings-button'}
+          onClick={() => setSettingsOpen(value => !value)}
+          aria-label={settingsOpen ? '返回计划' : '打开设置'}
+          title={settingsOpen ? '返回计划' : '个性化设置'}
+        >
+          {settingsOpen
+            ? <span aria-hidden='true'>←</span>
+            : (
+              <svg viewBox='0 0 24 24' aria-hidden='true'>
+                <path d='M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z' />
+                <path d='M19.1 13.4c.05-.46.05-.92 0-1.38l1.62-1.25-1.8-3.12-1.9.78a7.9 7.9 0 0 0-1.2-.7L15.55 5h-3.6l-.28 2.03c-.43.2-.83.44-1.2.7l-1.9-.78-1.8 3.12 1.62 1.25a7.3 7.3 0 0 0 0 1.38l-1.62 1.25 1.8 3.12 1.9-.78c.37.27.77.5 1.2.7L11.95 19h3.6l.28-2.03c.43-.2.83-.44 1.2-.7l1.9.78 1.8-3.12-1.63-1.25Z' />
+              </svg>
+            )}
+        </button>
       </header>
+
+      {settingsOpen
+        ? (
+          <section className='settings-panel panel-block' aria-labelledby='settings-title'>
+            <div className='settings-heading'>
+              <span className='eyebrow'>APPEARANCE</span>
+              <h2 id='settings-title'>外观设置</h2>
+              <p>所有修改会即时预览并自动保存。</p>
+            </div>
+
+            <div className='settings-grid'>
+              <label className='setting-field' htmlFor='font-family'>
+                <span>字体</span>
+                <select
+                  id='font-family'
+                  value={preferences.fontFamily}
+                  onChange={event => void updatePreferences({ fontFamily: event.target.value as FontFamilyPreference })}
+                >
+                  <option value='system'>现代系统字体</option>
+                  <option value='rounded'>柔和圆体</option>
+                  <option value='serif'>中文衬线体</option>
+                  <option value='mono'>等宽字体</option>
+                </select>
+              </label>
+
+              <label className='setting-field' htmlFor='font-size'>
+                <span>字体大小 <b>{preferences.fontSize}px</b></span>
+                <input
+                  id='font-size'
+                  type='range'
+                  min='12'
+                  max='18'
+                  step='1'
+                  value={preferences.fontSize}
+                  onChange={event => void updatePreferences({ fontSize: Number(event.target.value) })}
+                />
+              </label>
+
+              <div className='color-settings' aria-label='颜色设置'>
+                <label className='color-field' htmlFor='accent-color'>
+                  <input
+                    id='accent-color'
+                    type='color'
+                    value={preferences.accentColor}
+                    onChange={event => void updatePreferences({ accentColor: event.target.value })}
+                  />
+                  <span><b>强调色</b><small>{preferences.accentColor}</small></span>
+                </label>
+                <label className='color-field' htmlFor='text-color'>
+                  <input
+                    id='text-color'
+                    type='color'
+                    value={preferences.textColor}
+                    onChange={event => void updatePreferences({ textColor: event.target.value })}
+                  />
+                  <span><b>文字色</b><small>{preferences.textColor}</small></span>
+                </label>
+                <label className='color-field' htmlFor='glass-tint'>
+                  <input
+                    id='glass-tint'
+                    type='color'
+                    value={preferences.glassTint}
+                    onChange={event => void updatePreferences({ glassTint: event.target.value })}
+                  />
+                  <span><b>玻璃色</b><small>{preferences.glassTint}</small></span>
+                </label>
+              </div>
+
+              <button
+                type='button'
+                className='submit-button reset-appearance'
+                onClick={() => {
+                  void updatePreferences({ ...DEFAULT_PREFERENCES, motto: preferences.motto })
+                }}
+              >
+                恢复默认外观
+              </button>
+            </div>
+          </section>
+        )
+        : (
+          <>
 
       <div className='stats-strip short-stats' aria-label='短期计划总览'>
         <div className='stats-row'>
@@ -816,7 +998,7 @@ function App() {
 
               {tasks.length > 0
                 ? (
-                  <div className='task-list plan-task-list'>
+                  <div className='task-list'>
                     {tasks.map(task => {
                       const meta = priorityMeta(task.priority)
                       const longTask = task.longTaskId ? longTaskMap.get(task.longTaskId) : null
@@ -921,7 +1103,7 @@ function App() {
                     })}
                   </div>
                 )
-                : <div className='empty-state plan-empty-state'>这个计划还没有任务</div>}
+                : <div className='empty-state'>这个计划还没有任务</div>}
             </article>
           ))}
 
@@ -930,7 +1112,7 @@ function App() {
           )}
 
           {doneShortPlanCards.length > 0 && (
-            <details className='collapse-block short-done-collapse'>
+            <details className='collapse-block short-done-collapse' open>
               <summary>已完成的短期计划 <span>{doneShortPlanCards.length}</span></summary>
               {doneShortPlanCards.map(({ plan, tasks }) => (
                 <div key={plan.id} className='collapse-row'>
@@ -1042,14 +1224,14 @@ function App() {
             </form>
           )}
 
-          {dataReady && orderedLongTasks.length > 0
-            ? orderedLongTasks.map(task => {
+          {dataReady && activeLongTasks.length > 0
+            ? activeLongTasks.map(task => {
               const linked = longTaskStats.get(task.id) ?? { total: 0, completed: 0 }
               const progress = displayLongProgress(task)
               const canResolve = progress >= 100 && !task.completed
               if (editingLongTaskId === task.id) {
                 return (
-                  <article key={task.id} className='long-card long-edit-card'>
+                  <article key={task.id} className='long-card'>
                     <form
                       className='creator-form long-edit-form'
                       onSubmit={(event) => {
@@ -1091,6 +1273,17 @@ function App() {
               return (
                 <article key={task.id} className={task.completed ? 'long-card long-card-complete' : 'long-card'}>
                   <div className='long-card-head'>
+                    <label className='task-check long-task-check' title={task.completed ? '取消完成' : '标记完成'}>
+                      <input
+                        type='checkbox'
+                        checked={!!task.completed}
+                        aria-label={`${task.name}${task.completed ? '取消完成' : '标记完成'}`}
+                        onChange={event => {
+                          void toggleLongTask(task.id, event.target.checked)
+                        }}
+                      />
+                      <span aria-hidden='true' />
+                    </label>
                     <div>
                       <h3>{task.name}</h3>
                       <small>{task.start} 至 {task.end}</small>
@@ -1102,52 +1295,18 @@ function App() {
                       <span style={{ width: `${progress}%` }} />
                     </div>
                     <div className='long-card-actions'>
-                      {task.completed
-                        ? (
-                          <button
-                            type='button'
-                            className='submit-button compact-action'
-                            onClick={() => {
-                              void toggleLongTask(task.id, false)
-                            }}
-                          >
-                            恢复
-                          </button>
-                        )
-                        : canResolve
-                          ? (
-                            <>
-                              <button
-                                type='button'
-                                className='submit-button compact-action'
-                                onClick={() => {
-                                  void toggleLongTask(task.id, true)
-                                }}
-                              >
-                                完成
-                              </button>
-                              <button
-                                type='button'
-                                className='submit-button compact-action delay-action'
-                                onClick={() => {
-                                  void delayLongTask(task.id)
-                                }}
-                              >
-                                延期 7 天
-                              </button>
-                            </>
-                          )
-                          : (
-                            <button
-                              type='button'
-                              className='submit-button compact-action delay-action'
-                              onClick={() => {
-                                void delayLongTask(task.id)
-                              }}
-                            >
-                              延期 7 天
-                            </button>
-                          )}
+                      <label className='submit-button compact-action delay-picker'>
+                        延期
+                        <input
+                          type='date'
+                          min={task.start}
+                          value={task.end}
+                          aria-label={`${task.name}重新选择结束日期`}
+                          onChange={event => {
+                            void delayLongTask(task.id, event.target.value)
+                          }}
+                        />
+                      </label>
                       <button
                         type='button'
                         className='submit-button compact-action edit-action'
@@ -1175,9 +1334,130 @@ function App() {
                 </article>
               )
             })
-            : dataReady && !showLongCreator && <div className='empty-state'>还没有长期规划，创建后可在短期任务里关联它</div>}
+            : dataReady && completedLongTasks.length === 0 && !showLongCreator && <div className='empty-state'>还没有长期规划，创建后可在短期任务里关联它</div>}
+
+          {completedLongTasks.length > 0 && (
+            <details className='collapse-block long-done-collapse'>
+              <summary>已完成的长期计划 <span>{completedLongTasks.length}</span></summary>
+              {completedLongTasks.map(task => editingLongTaskId === task.id
+                ? (
+                  <form
+                    key={task.id}
+                    className='creator-form completed-long-edit-form'
+                    onSubmit={(event) => {
+                      void saveLongTaskEdit(event, task.id)
+                    }}
+                  >
+                    <input
+                      value={editLongName}
+                      onChange={event => setEditLongName(event.target.value)}
+                      autoFocus
+                      aria-label='修改已完成长期规划名称'
+                    />
+                    <div className='creator-grid long-edit-grid'>
+                      <input
+                        type='date'
+                        value={editLongStartDate}
+                        onChange={event => setEditLongStartDate(event.target.value)}
+                        aria-label='修改已完成规划开始日期'
+                      />
+                      <input
+                        type='date'
+                        value={editLongEndDate}
+                        onChange={event => setEditLongEndDate(event.target.value)}
+                        aria-label='修改已完成规划结束日期'
+                      />
+                      <button type='submit' className='submit-button mini-action'>保存</button>
+                      <button
+                        type='button'
+                        className='submit-button mini-action'
+                        onClick={() => setEditingLongTaskId(null)}
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </form>
+                )
+                : (
+                  <div key={task.id} className='collapse-row long-completed-row'>
+                  <label className='task-check' title='取消完成'>
+                    <input
+                      type='checkbox'
+                      checked={!!task.completed}
+                      aria-label={`${task.name}取消完成`}
+                      onChange={event => {
+                        void toggleLongTask(task.id, event.target.checked)
+                      }}
+                    />
+                    <span aria-hidden='true' />
+                  </label>
+                  <div>
+                    <strong>{task.name}</strong>
+                    <small>{task.start} 至 {task.end}</small>
+                  </div>
+                  <button
+                    type='button'
+                    className='icon-button ghost-button edit-button'
+                    aria-label='修改已完成长期规划'
+                    title='修改已完成长期规划'
+                    onClick={() => startEditLongTask(task)}
+                  >
+                    改
+                  </button>
+                  <button
+                    type='button'
+                    className='icon-button ghost-button danger-button compact-delete'
+                    aria-label='删除已完成长期规划'
+                    title='删除已完成长期规划'
+                    onClick={() => {
+                      void deleteLongTask(task.id)
+                    }}
+                  >
+                    ×
+                  </button>
+                  </div>
+                ))}
+            </details>
+          )}
         </div>
       </section>
+          </>
+        )}
+
+      <footer className='motto-footer'>
+        {editingMotto
+          ? (
+            <input
+              className='motto-input'
+              value={mottoDraft}
+              maxLength={120}
+              autoFocus
+              aria-label='编辑座右铭'
+              onChange={event => setMottoDraft(event.target.value)}
+              onBlur={() => {
+                void saveMotto()
+              }}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.currentTarget.blur()
+                } else if (event.key === 'Escape') {
+                  setMottoDraft(preferences.motto)
+                  setEditingMotto(false)
+                }
+              }}
+            />
+          )
+          : (
+            <button
+              type='button'
+              className='motto-display'
+              onClick={startEditingMotto}
+              title='点击编辑座右铭'
+            >
+              <span aria-hidden='true'>“</span>{preferences.motto}<span aria-hidden='true'>”</span>
+            </button>
+          )}
+      </footer>
     </div>
   )
 }

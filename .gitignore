@@ -10,5 +10,7 @@ pnpm-debug.log*
 .env.*
 
 build/manual-app/
+build/*-preview.png
+release/
 *.tmp
 *.bak
