@@ -1,4 +1,4 @@
-import { type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useState } from 'react'
+import { type CSSProperties, type FormEvent, useEffect, useMemo, useState } from 'react'
 import confetti from 'canvas-confetti'
 import { useDynamicUrgency } from './hooks/useDynamicUrgency'
 import './App.css'
@@ -16,7 +16,7 @@ const DEFAULT_PREFERENCES: AppearancePreferences = {
   fontSize: 14,
   accentColor: '#2f7cff',
   textColor: '#17334d',
-  glassTint: '#bfeeff',
+  glassTint: '#ffffff',
   motto: '把今天的行动，放进长期的节奏里',
 }
 
@@ -158,13 +158,14 @@ function normalizePreferences(value?: Partial<AppearancePreferences>): Appearanc
   const color = (candidate: string | undefined, fallback: string) => /^#[0-9a-fA-F]{6}$/.test(candidate ?? '')
     ? candidate!.toLowerCase()
     : fallback
+  const glassTint = color(value?.glassTint, DEFAULT_PREFERENCES.glassTint)
 
   return {
     fontFamily,
     fontSize: Math.max(12, Math.min(18, Math.round(rawFontSize))),
     accentColor: color(value?.accentColor, DEFAULT_PREFERENCES.accentColor),
     textColor: color(value?.textColor, DEFAULT_PREFERENCES.textColor),
-    glassTint: color(value?.glassTint, DEFAULT_PREFERENCES.glassTint),
+    glassTint: glassTint === '#bfeeff' ? DEFAULT_PREFERENCES.glassTint : glassTint,
     motto: value?.motto?.trim().slice(0, 120) || DEFAULT_PREFERENCES.motto,
   }
 }
@@ -663,14 +664,6 @@ function App() {
     await updatePreferences({ motto })
   }
 
-  function updateGlassLight(event: ReactPointerEvent<HTMLDivElement>) {
-    const bounds = event.currentTarget.getBoundingClientRect()
-    const x = ((event.clientX - bounds.left) / bounds.width) * 100
-    const y = ((event.clientY - bounds.top) / bounds.height) * 100
-    event.currentTarget.style.setProperty('--pointer-x', `${x}%`)
-    event.currentTarget.style.setProperty('--pointer-y', `${y}%`)
-  }
-
   function startEditLongTask(task: LongTask) {
     setShowLongCreator(false)
     setEditingLongTaskId(task.id)
@@ -719,18 +712,7 @@ function App() {
     <div
       className={settingsOpen ? 'widget-shell settings-mode' : 'widget-shell'}
       style={themeStyle}
-      onPointerMove={updateGlassLight}
     >
-      <svg className='liquid-filter-defs' aria-hidden='true'>
-        <defs>
-          <filter id='liquid-glass-edge' x='-20%' y='-20%' width='140%' height='140%'>
-            <feTurbulence type='fractalNoise' baseFrequency='0.012 0.026' numOctaves='2' seed='8' result='noise' />
-            <feGaussianBlur in='noise' stdDeviation='1.2' result='softNoise' />
-            <feDisplacementMap in='SourceGraphic' in2='softNoise' scale='8' xChannelSelector='R' yChannelSelector='B' />
-          </filter>
-        </defs>
-      </svg>
-      <div className='glass-atmosphere' aria-hidden='true' />
       <header className='widget-header'>
         <div className='title-stack'>
           <h1>计划小组件</h1>

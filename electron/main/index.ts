@@ -110,7 +110,7 @@ const DEFAULT_PREFERENCES: AppearancePreferences = {
   fontSize: 14,
   accentColor: '#2f7cff',
   textColor: '#17334d',
-  glassTint: '#bfeeff',
+  glassTint: '#ffffff',
   motto: '把今天的行动，放进长期的节奏里',
 }
 
@@ -151,12 +151,14 @@ function sanitizePreferences(value: unknown): AppearancePreferences {
     ? value.fontSize
     : DEFAULT_PREFERENCES.fontSize
 
+  const glassTint = cleanHexColor(value.glassTint, DEFAULT_PREFERENCES.glassTint)
+
   return {
     fontFamily,
     fontSize: Math.max(12, Math.min(18, Math.round(rawFontSize))),
     accentColor: cleanHexColor(value.accentColor, DEFAULT_PREFERENCES.accentColor),
     textColor: cleanHexColor(value.textColor, DEFAULT_PREFERENCES.textColor),
-    glassTint: cleanHexColor(value.glassTint, DEFAULT_PREFERENCES.glassTint),
+    glassTint: glassTint === '#bfeeff' ? DEFAULT_PREFERENCES.glassTint : glassTint,
     motto: cleanText(value.motto, 120) || DEFAULT_PREFERENCES.motto,
   }
 }
@@ -296,14 +298,15 @@ function ensureGlassPanel(target: BrowserWindow) {
     if (process.platform === 'win32' && liquidGlass.isSupported()) {
       const bounds = physicalWidgetBounds(target)
       const dpr = screen.getDisplayMatching(target.getBounds()).scaleFactor
+      target.setContentProtection(true)
       glassPanel = liquidGlass.createPanel({
         ...bounds,
         dpr,
         cornerRadius: WIDGET_RADIUS * dpr,
-        blurSigma: 2.4 * dpr,
-        displacementScale: 54 * dpr,
-        aberrationIntensity: 1.2,
-        saturation: 1.18,
+        blurSigma: 0.35 * dpr,
+        displacementScale: 72 * dpr,
+        aberrationIntensity: 0.35,
+        saturation: 1,
         excludeFromCapture: true,
         anchorWindow: target,
       })
@@ -314,6 +317,7 @@ function ensureGlassPanel(target: BrowserWindow) {
   }
 
   if (!glassPanel && process.platform === 'win32') {
+    target.setContentProtection(false)
     target.setBackgroundMaterial('acrylic')
   }
 }

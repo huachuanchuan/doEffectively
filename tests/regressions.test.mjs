@@ -47,14 +47,42 @@ test('planner IPC validates persisted collections before writing', async () => {
   assert.match(main, /sanitizeLongTasks\(tasks\)/)
 })
 
-test('liquid glass uses an edge displacement layer instead of blur alone', async () => {
+test('native glass keeps a clear center with refraction concentrated at the rim', async () => {
+  const main = await read('electron/main/index.ts')
   const app = await read('src/App.tsx')
   const css = await read('src/App.css')
+  const blur = Number(main.match(/blurSigma:\s*([\d.]+)\s*\*\s*dpr/)?.[1])
+  const displacement = Number(main.match(/displacementScale:\s*([\d.]+)\s*\*\s*dpr/)?.[1])
+  const aberration = Number(main.match(/aberrationIntensity:\s*([\d.]+)/)?.[1])
+  const saturation = Number(main.match(/saturation:\s*([\d.]+)/)?.[1])
 
-  assert.match(app, /id='liquid-glass-edge'/)
-  assert.match(app, /<feDisplacementMap/)
-  assert.match(css, /filter:\s*url\(#liquid-glass-edge\)/)
-  assert.match(css, /--pointer-x/)
+  assert.ok(blur <= 0.6, `expected almost-clear glass blur, got ${blur}`)
+  assert.ok(displacement >= 68, `expected a pronounced refractive rim, got ${displacement}`)
+  assert.ok(aberration <= 0.6, `expected restrained color fringing, got ${aberration}`)
+  assert.equal(saturation, 1)
+  assert.match(app, /glassTint:\s*'#ffffff'/)
+  assert.match(main, /glassTint:\s*'#ffffff'/)
+  assert.doesNotMatch(app, /liquid-filter-defs|liquid-glass-edge|glass-atmosphere/)
+  assert.doesNotMatch(css, /url\(#liquid-glass-edge\)|mix-blend-mode:\s*screen|@keyframes\s+glass-drift/)
+})
+
+test('the Electron content layer is excluded from desktop capture to prevent ghost trails', async () => {
+  const main = await read('electron/main/index.ts')
+
+  assert.match(main, /target\.setContentProtection\(true\)/)
+  assert.match(main, /target\.setContentProtection\(false\)[\s\S]*setBackgroundMaterial\('acrylic'\)/)
+  assert.match(main, /excludeFromCapture:\s*true/)
+})
+
+test('scrolling and completed rows use stable paint layers without softening all text', async () => {
+  const css = await read('src/App.css')
+  const scrollRule = css.match(/\.short-plan-scroll,\s*\.long-panel-scroll\s*\{([^}]*)\}/s)?.[1] ?? ''
+  const completedRule = css.match(/\.task-item-complete,\s*\.long-card-complete\s*\{([^}]*)\}/s)?.[1] ?? ''
+
+  assert.match(scrollRule, /contain:\s*layout\s+paint/)
+  assert.doesNotMatch(completedRule, /opacity\s*:/)
+  assert.match(css, /text-rendering:\s*geometricPrecision/)
+  assert.doesNotMatch(css, /will-change:\s*transform/)
 })
 
 test('motto is edited in place and persisted without a separate edit button', async () => {
